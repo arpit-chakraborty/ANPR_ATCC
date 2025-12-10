@@ -7,6 +7,7 @@ import io
 import os
 import pandas as pd
 import tempfile
+import subprocess
 
 st.markdown(
     """
@@ -152,10 +153,8 @@ def main():
         
         run_btn = st.button("🚀 Run Analysis", type="primary")
 
-        st.info("Note: Ensure 'fast_plate_ocr' is installed for License Plate reading.")
-
     # --- Main Content ---
-    st.title("👁️ AI Vision: Object & Plate Detection")
+    st.title("AI Vision: Object & Plate Detection")
 
     if not uploaded_file:
         st.markdown("""
@@ -252,148 +251,6 @@ def process_image_mode(uploaded_file, model, ocr_model, is_anpr, conf):
             )
         else:
             st.warning("No objects detected.")
-
-
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(uploaded_file.read())
-    video_path = tfile.name
-
-    cap = cv2.VideoCapture(video_path)
-    
-    # Video Properties
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # Output Setup
-    output_path = "output_video.mp4"
-    # Try H264 first, fallback to mp4v
-    try:
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    except:
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-    detection_log = []
-    
-    st.write(f"**Processing Video:** {total_frames} frames at {fps:.2f} FPS")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    frame_count = 0
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Current timestamp
-        current_time_sec = frame_count / fps
-        
-        # Detection
-        results = model(frame, conf=conf, verbose=False)
-        boxes = results[0].boxes
-
-        # Frame Data Store
-        frame_detections = []
-
-        # Convert to RGB for PIL drawing (Better text rendering)
-        frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(frame_pil)
-        
-        if len(boxes) > 0:
-            for box in boxes:
-                xyxy = box.xyxy[0].tolist()
-                cls_id = int(box.cls[0])
-                label = model.names[cls_id]
-                
-                # Logic for ANPR vs ATCC
-                if is_anpr and label == "license_plate":
-                    # OCR
-                    plate_text = run_ocr_on_crop(frame, xyxy, ocr_model)
-                    
-                    if plate_text:
-                        # Add to log
-                        detection_log.append({
-                            "Timestamp (s)": round(current_time_sec, 2),
-                            "Frame": frame_count,
-                            "License Plate": plate_text,
-                            "Confidence": float(box.conf[0])
-                        })
-                        
-                        # Draw on frame (Live Caption Effect)
-                        # We draw a large "HUD" style text above the car
-                        draw.rectangle(xyxy, outline=(0, 255, 0), width=3)
-                        
-                        # Background for text
-                        font = ImageFont.load_default() # Or load ttf if available
-                        text_disp = f"PLATE: {plate_text}"
-                        text_bbox = draw.textbbox((xyxy[0], xyxy[1]), text_disp, font=font)
-                        draw.rectangle([xyxy[0], xyxy[1]-20, xyxy[2], xyxy[1]], fill=(0, 255, 0))
-                        draw.text((xyxy[0]+5, xyxy[1]-20), text_disp, fill="black", font=font)
-                
-                elif not is_anpr:
-                    # ATCC Logic (Counting/Classifying)
-                    detection_log.append({
-                        "Timestamp (s)": round(current_time_sec, 2),
-                        "Frame": frame_count,
-                        "Type": label
-                    })
-                    # Draw standard box
-                    draw.rectangle(xyxy, outline="blue", width=2)
-                    draw.text((xyxy[0], xyxy[1]-10), label, fill="blue")
-
-        # Convert back to BGR for VideoWriter
-        final_frame = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
-        
-        # Add a global timestamp overlay on the video itself
-        cv2.putText(final_frame, f"Time: {current_time_sec:.2f}s", (30, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        
-        out.write(final_frame)
-        
-        frame_count += 1
-        if frame_count % 10 == 0:
-            progress_bar.progress(min(frame_count / total_frames, 1.0))
-            status_text.text(f"Processing Frame {frame_count}/{total_frames}")
-
-    cap.release()
-    out.release()
-    progress_bar.empty()
-    status_text.empty()
-    os.remove(video_path) # Clean up input temp
-
-    # --- Display Results ---
-    st.success("Processing Complete!")
-    
-    tab1, tab2 = st.tabs(["🎥 Video Result", "💾 Data Logs"])
-    
-    with tab1:
-        st.video(output_path)
-        
-        with open(output_path, 'rb') as v:
-            st.download_button("⬇️ Download Processed Video", v, file_name="anpr_output.mp4")
-
-    with tab2:
-        st.subheader("Detailed Detection Log")
-        if detection_log:
-            df = pd.DataFrame(detection_log)
-            
-            # Logic to group unique plates if needed, but client asked for per-frame updates
-            # displaying the raw log allows them to see exactly what was detected at 0.3s vs 0.6s
-            st.dataframe(df, use_container_width=True)
-            
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "⬇️ Download CSV Log",
-                csv,
-                "video_detection_log.csv",
-                "text/csv"
-            )
-        else:
-            st.warning("No detections found in video.")
 
 def process_video_mode(uploaded_file, model, ocr_model, is_anpr, conf):
 
@@ -521,15 +378,17 @@ def process_video_mode(uploaded_file, model, ocr_model, is_anpr, conf):
             pass
 
     # --- Display Results ---
+    converted_video = "output_h264.mp4"
+    
+    subprocess.call(args=f"ffmpeg -y -i {output_path} -c:v libx264 {converted_video}", shell=True)
     st.success("Processing Complete!")
     
     tab1, tab2 = st.tabs(["🎥 Video Result", "💾 Data Logs"])
     
     with tab1:
         # Note: 'mp4v' videos might not play in all browsers, but download works.
-        with open(output_path, "rb") as f:
-            video_bytes = f.read()
-        st.video(video_bytes)
+
+        st.video(converted_video)
         
         with open(output_path, 'rb') as v:
             st.download_button("⬇️ Download Processed Video", v, file_name="anpr_output.mp4")
