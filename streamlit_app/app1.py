@@ -6,7 +6,6 @@ import numpy as np
 import io
 import os
 
-# --- Configuration ---
 MODEL_OPTIONS = {
     "ANPR (Automatic Number Plate Recognition)": "yolo_ANPR.pt",
     "ATCC (Automatic Traffic Count and Classification)": "yolo_ATCC.pt",
@@ -19,7 +18,6 @@ ATCC_CLASSES = [
 
 ANPR_CLASSES = ["license plate"]
 
-# --- Streamlit Setup ---
 st.set_page_config(
     page_title="YOLO Object Detection App",
     layout="wide"
@@ -28,7 +26,6 @@ st.set_page_config(
 st.title("🚗 YOLO Model Selector & Detector")
 st.markdown("Upload an image or video and choose a model to run object detection.")
 
-# --- Model Loading (Caching for efficiency) ---
 @st.cache_resource
 def load_model(model_path):
     """Loads a YOLO model and caches it."""
